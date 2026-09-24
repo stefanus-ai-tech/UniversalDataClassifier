@@ -1,0 +1,32 @@
+{
+  "id": "support-router-v1",
+  "name": "Support routing",
+  "description": "Route customer requests to the right team.",
+  "primary_question": "department",
+  "questions": {
+    "department": {
+      "type": "choice",
+      "instructions": "Which department should handle this request?",
+      "criteria": {
+        "billing": "invoices, payments, duplicate charges, refunds, tagihan, pembayaran, pengembalian uang",
+        "account": "login, password, account access, akun, masuk, sandi",
+        "technical": "bugs, errors, outages, broken features, gangguan, tidak berfungsi",
+        "sales": "pricing, purchases, plans, harga, pembelian, paket",
+        "other": "requests that do not fit another team"
+      }
+    },
+    "urgency": {
+      "type": "score",
+      "instructions": "How urgent is this request?",
+      "criteria": ["not urgent", "normal", "blocking or time sensitive", "critical"]
+    }
+  },
+  "thresholds": {"auto_approve": 0.85, "needs_review": 0.60},
+  "actions": {
+    "billing": "/mock/helpdesk/billing",
+    "account": "/mock/helpdesk/account",
+    "technical": "/mock/helpdesk/technical",
+    "sales": "/mock/helpdesk/sales",
+    "other": "/mock/helpdesk/general"
+  }
+}

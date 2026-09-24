@@ -1,0 +1,23 @@
+{
+  "id": "sentiment-v1",
+  "name": "Text sentiment",
+  "description": "Classify feedback as positive, neutral, or negative.",
+  "primary_question": "sentiment",
+  "questions": {
+    "sentiment": {
+      "type": "choice",
+      "instructions": "What sentiment does this text express?",
+      "criteria": {
+        "positive": "satisfaction, praise, gratitude, happy feedback",
+        "neutral": "factual statement without clear positive or negative feeling",
+        "negative": "complaint, frustration, disappointment, criticism"
+      }
+    }
+  },
+  "thresholds": {"auto_approve": 0.85, "needs_review": 0.60},
+  "actions": {
+    "positive": "/mock/feedback/positive",
+    "neutral": "/mock/feedback/neutral",
+    "negative": "/mock/feedback/negative"
+  }
+}
