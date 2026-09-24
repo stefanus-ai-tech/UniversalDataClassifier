@@ -11,10 +11,11 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from uadc.contracts import list_contracts
+from uadc.decision import laya_health
 from uadc.export import make_workbook
 from uadc.ingest import SUPPORTED
 from uadc.llm import available
-from uadc.pipeline import UPLOADS, create_run, execute_run, get_run, iter_csv, iter_json, list_records, summary, update_plan
+from uadc.pipeline import UPLOADS, create_run, execute_run, get_run, iter_csv, iter_json, list_records, retry_laya, summary, update_plan
 
 app = FastAPI(title="Universal Adaptive Data Classifier", version="0.1.0")
 ROOT = Path(__file__).resolve().parent
@@ -23,7 +24,7 @@ UPLOADS.mkdir(parents=True, exist_ok=True)
 
 @app.get("/api/config")
 def config():
-    return {"contracts": list_contracts(), "groq_configured": available(), "laya_configured": bool(os.getenv("LAYA_URL")), "formats": sorted(SUPPORTED)}
+    return {"contracts": list_contracts(), "groq_configured": available(), "laya": laya_health(), "formats": sorted(SUPPORTED)}
 
 
 @app.post("/api/intake")
@@ -79,6 +80,9 @@ def execute(run_id: str, background: BackgroundTasks):
         raise HTTPException(404, str(exc)) from exc
     if run["status"] != "READY":
         raise HTTPException(409, "Run already started")
+    health = laya_health()
+    if health["configured"] and not health["reachable"]:
+        raise HTTPException(503, health["message"] + ". Start Laya or clear LAYA_URL in .env and restart UADC for demo mode.")
     background.add_task(execute_run, run_id)
     return {"status": "QUEUED", "run_id": run_id}
 
@@ -91,6 +95,23 @@ def records(run_id: str, offset: int = 0, limit: int = 50, review: str | None = 
         return list_records(run_id, offset, limit, review)
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/api/runs/{run_id}/retry-laya")
+def retry_failed_laya(run_id: str, background: BackgroundTasks):
+    try:
+        run = get_run(run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    if run["status"] != "COMPLETE":
+        raise HTTPException(409, "Run is not complete")
+    health = laya_health()
+    if not health["reachable"]:
+        raise HTTPException(503, health["message"])
+    if summary(run_id)["engines"].get("laya_error", 0) == 0:
+        raise HTTPException(409, "No failed Laya decisions to retry")
+    background.add_task(retry_laya, run_id)
+    return {"status": "QUEUED", "run_id": run_id}
 
 
 @app.get("/api/runs/{run_id}/export/{format}")

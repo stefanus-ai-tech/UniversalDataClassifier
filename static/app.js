@@ -23,9 +23,9 @@ function metric(label,value,tone='') { return `<div class="metric ${tone}"><span
 async function init() {
   try {
     const config = await api('/api/config');
-    $('#contract').innerHTML = config.contracts.map(c=>`<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
-    if(config.contracts.some(c=>c.id==='support')) $('#contract').value='support';
-    $('#service-status').innerHTML = `<span class="${config.groq_configured?'on':''}"><i></i>Groq ${config.groq_configured?'ready':'off'}</span><span class="${config.laya_configured?'on':''}"><i></i>Laya ${config.laya_configured?'ready':'demo mode'}</span>`;
+    $('#contract').innerHTML = '<option value="" disabled selected>Choose a classifier</option>'+config.contracts.map(c=>`<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
+    $('#service-status').innerHTML = `<span class="${config.groq_configured?'on':''}"><i></i>Groq ${config.groq_configured?'ready':'off'}</span><span class="${config.laya.reachable?'on':''}"><i></i>Laya ${config.laya.reachable?'ready':config.laya.configured?'offline':'demo mode'}</span>`;
+    if(config.laya.configured && !config.laya.reachable) toast(config.laya.message);
   } catch(e) { toast(e.message); }
   const saved = new URLSearchParams(location.search).get('run');
   if(saved) { try { currentRun=await api(`/api/runs/${saved}`); renderRun(currentRun); if(currentRun.status==='RUNNING') startPolling(); } catch {} }
@@ -52,6 +52,8 @@ $('#intake-form').addEventListener('submit', async e=>{
 function renderRun(run) {
   showSection('discovery'); showSection('pipeline');
   $('#source-name').textContent=run.profile.filename;
+  $('#contract-warning').textContent=run.contract_warning||'';
+  $('#contract-warning').classList.toggle('hidden',!run.contract_warning);
   const p=run.profile;
   $('#profile-metrics').innerHTML=metric('Records',p.records)+metric('Fields',p.field_count)+metric('Exact duplicates',p.duplicate_count,'amber')+metric('Malformed',p.malformed_count,p.malformed_count?'red':'teal');
   $('#fields-table').innerHTML=p.columns.map(c=>`<tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.type)}</td><td>${c.missing_pct}%</td></tr>`).join('');
@@ -78,9 +80,10 @@ $('#run-button').addEventListener('click',async()=>{
 function startPolling(){if(timer)clearInterval(timer);timer=setInterval(async()=>{try{currentRun=await api(`/api/runs/${currentRun.id}`);$('#run-status').textContent=currentRun.status;updateProgress(currentRun);if(['COMPLETE','FAILED'].includes(currentRun.status)){clearInterval(timer);timer=null;renderRun(currentRun)}}catch(err){clearInterval(timer);toast(err.message)}},1200)}
 function updateProgress(run){
   const processed=run.metrics?.processed||0, total=run.metrics?.input||1;
-  const pct=run.status==='COMPLETE'?100:run.status==='READY'?12:Math.max(15,Math.min(98,Math.round(processed/total*100)));
+  const retrying=run.stage==='retrying_laya';
+  const pct=run.status==='COMPLETE'?100:run.status==='READY'?12:retrying?Math.max(15,Math.min(98,Math.round((run.metrics.retry_processed||0)/(run.metrics.retry_total||1)*100))):Math.max(15,Math.min(98,Math.round(processed/total*100)));
   $('#progress-bar').style.width=`${pct}%`;
-  $('#progress-text').textContent=run.status==='COMPLETE'?`Completed · ${fmt(processed)} records processed`:run.status==='FAILED'?run.error:run.status==='READY'?'Cleaning plan ready for review.':`${fmt(processed)} / ${fmt(total)} records · ${run.stage.replaceAll('_',' ')}`;
+  $('#progress-text').textContent=run.status==='COMPLETE'?`Completed · ${fmt(processed)} records processed`:run.status==='FAILED'?run.error:run.status==='READY'?'Cleaning plan ready for review.':retrying?`${fmt(run.metrics.retry_processed||0)} / ${fmt(run.metrics.retry_total||0)} Laya decisions retried`:`${fmt(processed)} / ${fmt(total)} records · ${run.stage.replaceAll('_',' ')}`;
   const done=run.status==='COMPLETE'?5:run.status==='READY'?1:run.stage==='cleaning'?2:3;
   [...$('#steps').children].forEach((step,i)=>{step.classList.toggle('done',i<done);step.querySelector('span').textContent=i<done?'complete':run.status==='RUNNING'&&i===done?'running':'waiting'});
 }
@@ -91,9 +94,11 @@ function renderResults(run){
   const labels=Object.entries(s.labels||{}), max=Math.max(1,...labels.map(x=>x[1]));
   $('#label-chart').innerHTML=labels.map(([label,count])=>`<div class="bar-row"><span>${escapeHtml(label)}</span><div class="bar-track"><div style="width:${count/max*100}%"></div></div><b>${count}</b></div>`).join('')||'<p class="small-note">No results.</p>';
   $('#engine-chart').innerHTML=Object.entries(s.engines||{}).map(([name,count])=>`<div class="engine-row"><span>${escapeHtml(name.replaceAll('_',' '))}</span><b>${count}</b></div>`).join('');
+  $('#retry-laya').classList.toggle('hidden',!(s.engines?.laya_error>0));
   for(const type of ['xlsx','csv','json']) $('#export-'+type).href=`/api/runs/${run.id}/export/${type}`;
   loadRecords();
 }
+$('#retry-laya').addEventListener('click',async()=>{if(!currentRun)return;try{await api(`/api/runs/${currentRun.id}/retry-laya`,{method:'POST'});$('#retry-laya').classList.add('hidden');startPolling()}catch(err){toast(err.message)}});
 async function loadRecords(){
   if(!currentRun) return;
   const filter=$('#review-filter').value;
@@ -114,7 +119,7 @@ function showRecord(r){
     <div class="trace-block"><h5>SOURCE · ROW ${r.row_number}</h5><pre>${escapeHtml(JSON.stringify(r.raw_data,null,2))}</pre></div>
     <div class="trace-block"><h5>CLEANED DATA</h5><pre>${escapeHtml(JSON.stringify(r.cleaned_data,null,2))}</pre></div>
     <div class="trace-block"><h5>SEMANTIC STATE & EVIDENCE</h5><pre>${escapeHtml(JSON.stringify({facts:r.semantic_state,evidence:r.evidence},null,2))}</pre></div>
-    <div class="trace-block"><h5>DECISION</h5><span class="trace-decision">${escapeHtml(r.decision.label||'Unresolved')}</span><span class="trace-meta">${escapeHtml(r.decision.engine)} · ${confidence}</span><pre>${escapeHtml(JSON.stringify(r.decision.alternatives,null,2))}</pre></div>
+    <div class="trace-block"><h5>DECISION</h5><span class="trace-decision">${escapeHtml(r.decision.label||'Unresolved')}</span><span class="trace-meta">${escapeHtml(r.decision.engine)} · ${confidence}</span>${r.decision.error?`<p class="decision-error">${escapeHtml(r.decision.error)}</p>`:''}<pre>${escapeHtml(JSON.stringify(r.decision.alternatives,null,2))}</pre></div>
     <div class="trace-block"><h5>POLICY & API SIMULATION</h5><pre>${escapeHtml(JSON.stringify(r.action,null,2))}</pre></div>`;
 }
 $('#review-filter').addEventListener('change',()=>{offset=0;loadRecords()});

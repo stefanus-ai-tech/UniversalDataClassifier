@@ -8,7 +8,35 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Iterator
 
-SUPPORTED = {".csv", ".tsv", ".json", ".jsonl", ".txt", ".log", ".md", ".xlsx"}
+SUPPORTED = {".csv", ".tsv", ".json", ".jsonl", ".txt", ".log", ".md", ".pgn", ".xlsx"}
+
+
+def _looks_like_pgn(path: Path) -> bool:
+    if path.suffix.lower() not in {".txt", ".pgn"}:
+        return False
+    with path.open("r", encoding="utf-8-sig", errors="replace") as handle:
+        sample = handle.read(12000)
+    return bool(re.search(r'^\[(?:Event|Site|GameID)\s+"[^"]*"\]', sample, re.M) and re.search(r'^\[Result\s+"(?:1-0|0-1|1/2-1/2|\*)"\]', sample, re.M))
+
+
+def _pgn_records(path: Path) -> Iterator[tuple[int, dict]]:
+    tags: dict[str, str] = {}
+    moves: list[str] = []
+    index = 0
+    for line in _text_lines(path):
+        stripped = line.strip()
+        match = re.fullmatch(r'\[([A-Za-z][A-Za-z0-9_]*)\s+"(.*)"\]', stripped)
+        if match:
+            if moves:
+                index += 1
+                yield index, {**tags, "moves": " ".join(moves)}
+                tags, moves = {}, []
+            tags[match.group(1)] = match.group(2)
+        elif stripped and tags:
+            moves.append(stripped)
+    if tags:
+        index += 1
+        yield index, {**tags, "moves": " ".join(moves)}
 
 
 def sha256(path: Path) -> str:
@@ -37,7 +65,9 @@ def read_records(path: Path) -> Iterator[tuple[int, dict]]:
     suffix = path.suffix.lower()
     if suffix not in SUPPORTED:
         raise ValueError(f"Unsupported format: {suffix}")
-    if suffix in {".csv", ".tsv"}:
+    if _looks_like_pgn(path):
+        yield from _pgn_records(path)
+    elif suffix in {".csv", ".tsv"}:
         with path.open("r", encoding="utf-8-sig", newline="") as handle:
             sample = handle.read(8192)
             handle.seek(0)
@@ -131,4 +161,4 @@ def profile(path: Path, sample_limit: int = 12) -> dict:
             "avg_length": round(stats["length_sum"] / present, 1) if present else 0,
             "top_values": stats["examples"].most_common(3),
         })
-    return {"filename": path.name, "format": path.suffix.lower().lstrip("."), "source_hash": sha256(path), "records": count, "field_count": len(columns), "duplicate_count": duplicates, "malformed_count": malformed, "columns": columns, "samples": samples}
+    return {"filename": path.name, "format": "pgn" if _looks_like_pgn(path) else path.suffix.lower().lstrip("."), "source_hash": sha256(path), "records": count, "field_count": len(columns), "duplicate_count": duplicates, "malformed_count": malformed, "columns": columns, "samples": samples}

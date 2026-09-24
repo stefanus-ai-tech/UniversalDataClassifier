@@ -12,6 +12,10 @@ from uadc.cleaning import clean_record, validate_plan
 from uadc.contracts import load_contract
 from uadc.decision import gate
 from uadc.decision import classify
+from uadc.ingest import profile, read_records
+from uadc.pipeline import contract_warning
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 
 class PipelineTests(unittest.TestCase):
@@ -66,7 +70,7 @@ class PipelineTests(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *args): pass
             def read(self, *args):
-                return json.dumps({"answers": {"department": {"choice": "billing", "confidence": .93, "probabilities": {"billing": .93, "account": .07}}, "urgency": {"score": 2.0}}, "routing": {"model": "multilingual"}}).encode()
+                return json.dumps({"answers": {"department": {"choice": "billing", "confidence": .7, "answer_confidence": .93, "probabilities": {"billing": .93, "account": .07}}, "urgency": {"score": 2.0}}, "routing": {"model": "multilingual"}}).encode()
 
         with patch.dict(os.environ, {"LAYA_URL": "http://127.0.0.1:8001"}), patch("urllib.request.urlopen", return_value=FakeResponse()) as mocked:
             result = classify({"facts": {"message": "charged twice"}}, load_contract("support"))
@@ -75,6 +79,27 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(result["routing"]["model"], "multilingual")
         self.assertEqual(gate(result, load_contract("support"))["status"], "AUTO_APPROVED")
         self.assertIn("/v1/systemone", mocked.call_args.args[0].full_url)
+
+    def test_pgn_is_grouped_by_game_and_mismatch_is_flagged(self):
+        data = '[Site "VRChess"]\n[Result "1-0"]\n\n1.e4 e5 1-0\n\n[Site "VRChess"]\n[Result "0-1"]\n\n1.d4 d5 0-1\n'
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / "games.txt"
+            path.write_text(data, encoding="utf-8")
+            records = list(read_records(path))
+            self.assertEqual(len(records), 2)
+            self.assertEqual(records[0][1]["Result"], "1-0")
+            data_profile = profile(path)
+            self.assertEqual(data_profile["format"], "pgn")
+            self.assertIsNotNone(contract_warning(data_profile, "support"))
+
+    def test_offline_laya_is_reported_before_processing(self):
+        with patch.dict(os.environ, {"GROQ_API_KEY": "", "LAYA_URL": ""}):
+            created = self.client.post("/api/intake", files={"file": ("tickets.csv", b"message\nrefund please\n", "text/csv")}, data={"contract": "support"}).json()
+        with patch("app.laya_health", return_value={"configured": True, "reachable": False, "message": "Laya server is unreachable"}):
+            response = self.client.post(f"/api/runs/{created['id']}/execute")
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Laya server is unreachable", response.json()["detail"])
+        self.assertEqual(self.client.get(f"/api/runs/{created['id']}").json()["status"], "READY")
 
 
 if __name__ == "__main__":

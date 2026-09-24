@@ -41,7 +41,20 @@ def _path(run_id: str) -> Path:
 
 
 def get_run(run_id: str) -> dict:
-    return json.loads(_path(run_id).read_text(encoding="utf-8"))
+    run = json.loads(_path(run_id).read_text(encoding="utf-8"))
+    run["contract_warning"] = contract_warning(run["profile"], run["contract"])
+    return run
+
+
+def contract_warning(data_profile: dict, contract_name: str) -> str | None:
+    samples = data_profile.get("samples", [])
+    looks_pgn = data_profile.get("format") == "pgn" or any(
+        isinstance(sample.get("text"), str) and sample["text"].startswith(("[Site \"", "[Event \"", "[GameID \""))
+        for sample in samples if isinstance(sample, dict)
+    )
+    if looks_pgn and contract_name in {"support", "sentiment"}:
+        return "This file looks like chess PGN, but the selected classifier is for customer text. Its labels and confidence do not describe chess games."
+    return None
 
 
 def _save(run: dict) -> None:
@@ -56,6 +69,9 @@ def create_run(path: Path, contract_name: str, objective: str, display_name: str
     data_profile = profile(path)
     if display_name:
         data_profile["filename"] = display_name
+    warning = contract_warning(data_profile, contract_name)
+    if warning:
+        raise ValueError(warning)
     if not data_profile["records"]:
         raise ValueError("No records found")
     plan = make_plan(data_profile, objective)
@@ -136,6 +152,47 @@ def execute_run(run_id: str) -> None:
     except Exception as exc:
         run["status"] = "FAILED"
         run["stage"] = "failed"
+        run["error"] = f"{type(exc).__name__}: {exc}"[:500]
+        _save(run)
+    finally:
+        connection.close()
+
+
+def retry_laya(run_id: str) -> None:
+    """Reclassify stored semantic states after the Laya service comes online."""
+    run = get_run(run_id)
+    if run["status"] != "COMPLETE":
+        raise ValueError("Only a complete run can be retried")
+    connection = _connect(run_id)
+    try:
+        rows = connection.execute("SELECT record_id, semantic_state, decision FROM records ORDER BY row_number").fetchall()
+        targets = [(row[0], json.loads(row[1])) for row in rows if json.loads(row[2]).get("engine") == "laya_error"]
+        if not targets:
+            return
+        contract = load_contract(run["contract"])
+        run["status"] = "RUNNING"
+        run["stage"] = "retrying_laya"
+        run["metrics"]["retry_total"] = len(targets)
+        run["metrics"]["retry_processed"] = 0
+        _save(run)
+        for record_id, facts in targets:
+            decision = classify({"facts": facts}, contract)
+            review = gate(decision, contract)
+            action = simulate_action(record_id, decision, review, contract)
+            connection.execute("UPDATE records SET decision=?, review=?, action=? WHERE record_id=?", (_dump(decision), _dump(review), _dump(action), record_id))
+            run["metrics"]["retry_processed"] += 1
+            if run["metrics"]["retry_processed"] % 20 == 0:
+                connection.commit()
+                _save(run)
+        connection.commit()
+        run["status"] = "COMPLETE"
+        run["stage"] = "complete"
+        run["completed_at"] = _now()
+        _save(run)
+    except Exception as exc:
+        connection.rollback()
+        run["status"] = "FAILED"
+        run["stage"] = "retry_failed"
         run["error"] = f"{type(exc).__name__}: {exc}"[:500]
         _save(run)
     finally:

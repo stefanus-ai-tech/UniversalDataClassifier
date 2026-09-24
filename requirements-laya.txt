@@ -1,0 +1,2 @@
+# Optional local decision server. Install after requirements.txt.
+laya[serve]>=0.3.20,<1

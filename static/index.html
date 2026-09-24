@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>UADC — Data Operations Console</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/overrides.css">
 </head>
 <body>
   <div class="app-shell">
@@ -27,20 +28,20 @@
         <section id="intake" class="section"><div class="section-heading"><div><span class="section-index">01 / INPUT</span><h2>Data intake</h2></div><span class="section-hint">Start with a file and a decision contract</span></div>
           <div class="panel upload-panel">
             <form id="intake-form">
-              <label class="dropzone" id="dropzone" for="file"><input id="file" name="file" type="file" accept=".csv,.tsv,.json,.jsonl,.xlsx,.txt,.log,.md" required><span class="upload-icon">↥</span><strong>Drop your dataset here</strong><span>or click to browse · CSV, TSV, JSON, JSONL, XLSX, TXT, LOG, MD</span><b id="file-name">No file selected</b></label>
-              <div class="form-row"><label>Classifier<select id="contract" name="contract"></select></label><label>Objective <span class="optional">optional</span><input id="objective" name="objective" placeholder="e.g. Route requests to the right team"></label></div>
+              <label class="dropzone" id="dropzone" for="file"><input id="file" name="file" type="file" accept=".csv,.tsv,.json,.jsonl,.xlsx,.txt,.log,.md,.pgn" required><span class="upload-icon">↥</span><strong>Drop your dataset here</strong><span>or click to browse · CSV, TSV, JSON, JSONL, XLSX, TXT, LOG, MD, PGN</span><b id="file-name">No file selected</b></label>
+              <div class="form-row"><label>Classifier<select id="contract" name="contract" required><option value="" disabled selected>Choose a classifier</option></select></label><label>Objective <span class="optional">optional</span><input id="objective" name="objective" placeholder="e.g. Route requests to the right team"></label></div>
               <button class="primary-button" id="analyze-button" type="submit">Analyze dataset <span>→</span></button>
             </form>
           </div>
         </section>
 
-        <section id="discovery" class="section hidden"><div class="section-heading"><div><span class="section-index">02 / UNDERSTAND</span><h2>Dataset discovery</h2></div><span class="section-hint" id="source-name"></span></div>
+        <section id="discovery" class="section hidden"><div class="section-heading"><div><span class="section-index">02 / UNDERSTAND</span><h2>Dataset discovery</h2></div><span class="section-hint" id="source-name"></span></div><div id="contract-warning" class="contract-warning hidden"></div>
           <div class="metric-grid" id="profile-metrics"></div>
           <div class="two-col"><div class="panel"><div class="panel-heading"><h3>Fields & quality</h3><span>Inferred from source</span></div><div class="table-wrap"><table><thead><tr><th>FIELD</th><th>TYPE</th><th>MISSING</th></tr></thead><tbody id="fields-table"></tbody></table></div></div><div class="panel"><div class="panel-heading"><h3>Sample record</h3><span>Original data</span></div><pre id="sample-record" class="code-block"></pre></div></div>
           <div class="panel plan-panel"><div class="panel-heading"><div><h3>Adaptive cleaning plan</h3><p id="plan-origin"></p></div><span class="safe-badge">BOUNDED OPERATIONS</span></div><div id="plan-operations" class="operations"></div><div class="plan-footer"><span>Every change gets an audit entry. No generated Python is executed.</span><button id="run-button" class="primary-button" type="button">Run pipeline <span>→</span></button></div></div>
         </section>
 
-        <section id="pipeline" class="section hidden"><div class="section-heading"><div><span class="section-index">03 / PROCESS</span><h2>Pipeline monitor</h2></div><span class="pill" id="run-status">READY</span></div><div class="panel pipeline-panel"><div class="steps" id="steps"><div>01 <strong>Ingest & profile</strong><span>complete</span></div><div>02 <strong>Clean</strong><span>waiting</span></div><div>03 <strong>Interpret</strong><span>waiting</span></div><div>04 <strong>Laya decision</strong><span>waiting</span></div><div>05 <strong>Policy & simulation</strong><span>waiting</span></div></div><div class="progress-track"><div id="progress-bar"></div></div><p id="progress-text">Ready to run.</p></div>
+        <section id="pipeline" class="section hidden"><div class="section-heading"><div><span class="section-index">03 / PROCESS</span><h2>Pipeline monitor</h2></div><span class="pill" id="run-status">READY</span></div><div class="panel pipeline-panel"><div class="steps" id="steps"><div>01 <strong>Ingest & profile</strong><span>complete</span></div><div>02 <strong>Clean</strong><span>waiting</span></div><div>03 <strong>Interpret</strong><span>waiting</span></div><div>04 <strong>Laya decision</strong><span>waiting</span></div><div>05 <strong>Policy & simulation</strong><span>waiting</span></div></div><div class="progress-track"><div id="progress-bar"></div></div><p id="progress-text">Ready to run.</p><button id="retry-laya" class="primary-button hidden" type="button">Retry failed Laya decisions <span>↻</span></button></div>
           <div class="metric-grid" id="result-metrics"></div><div class="two-col"><div class="panel"><div class="panel-heading"><h3>Classification distribution</h3><span>All processed records</span></div><div id="label-chart" class="bar-chart"></div></div><div class="panel"><div class="panel-heading"><h3>Decision engines</h3><span>Source of predictions</span></div><div id="engine-chart" class="engine-chart"></div><p class="small-note">Rule demo scores are never treated as calibrated model confidence.</p></div></div>
         </section>
 

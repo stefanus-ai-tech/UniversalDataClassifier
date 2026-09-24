@@ -18,10 +18,29 @@ def _laya_url() -> str | None:
     return base + "/v1/systemone"
 
 
+def laya_health() -> dict:
+    base = os.getenv("LAYA_URL", "").strip().rstrip("/")
+    if not base:
+        return {"configured": False, "reachable": False, "message": "Laya is not configured; demo rules will be used"}
+    try:
+        url = _laya_url()
+        with urllib.request.urlopen(url.removesuffix("/v1/systemone") + "/health", timeout=2) as response:
+            payload = json.load(response)
+        if payload.get("status") == "ok":
+            return {"configured": True, "reachable": True, "message": "Laya server is ready", "loaded": payload.get("loaded", [])}
+        return {"configured": True, "reachable": False, "message": "Laya health check did not return OK"}
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return {"configured": True, "reachable": False, "message": f"Laya server is unreachable at {base}: {type(exc).__name__}"}
+
+
 def classify(state: dict, contract: dict) -> dict:
     url = _laya_url()
     if url:
-        body = json.dumps({"state": state["facts"], "questions": contract["questions"]}, ensure_ascii=False, default=str).encode()
+        request_data = {"state": state["facts"], "questions": contract["questions"]}
+        model = os.getenv("LAYA_MODEL", "multilingual").strip()
+        if model and model != "auto":
+            request_data["model"] = model
+        body = json.dumps(request_data, ensure_ascii=False, default=str).encode()
         headers = {"Content-Type": "application/json"}
         if os.getenv("LAYA_API_KEY"):
             headers["Authorization"] = "Bearer " + os.environ["LAYA_API_KEY"]
@@ -33,10 +52,11 @@ def classify(state: dict, contract: dict) -> dict:
             if label not in contract["questions"][contract["primary_question"]]["criteria"]:
                 raise ValueError("Laya returned a label outside the contract")
             probabilities = _probabilities(answer, contract)
-            confidence = float(answer.get("confidence", probabilities.get(label, 0)))
-            if not math.isfinite(confidence) or not 0 <= confidence <= 1:
+            raw_confidence = answer.get("answer_confidence", probabilities.get(label))
+            confidence = float(raw_confidence) if raw_confidence is not None else None
+            if confidence is not None and (not math.isfinite(confidence) or not 0 <= confidence <= 1):
                 raise ValueError("Invalid confidence from Laya")
-            return {"label": label, "confidence": confidence, "alternatives": probabilities, "engine": "laya", "answers": result["answers"], "routing": result.get("routing")}
+            return {"label": label, "confidence": confidence, "distribution_confidence": answer.get("confidence"), "alternatives": probabilities, "engine": "laya", "answers": result["answers"], "routing": result.get("routing")}
         except (OSError, KeyError, ValueError, TypeError, json.JSONDecodeError) as exc:
             return {"label": None, "confidence": None, "alternatives": {}, "engine": "laya_error", "error": str(exc)[:300]}
     return _rule_classify(state, contract)
@@ -71,6 +91,8 @@ def gate(decision: dict, contract: dict) -> dict:
     if decision["engine"] != "laya" or decision["label"] is None:
         return {"status": "UNRESOLVED", "reason": "Model confidence unavailable; demo rules are not auto approved"}
     confidence = decision["confidence"]
+    if confidence is None:
+        return {"status": "NEEDS_REVIEW", "reason": "Laya did not return answer confidence"}
     thresholds = contract["thresholds"]
     if confidence >= thresholds["auto_approve"]:
         return {"status": "AUTO_APPROVED", "reason": None}
