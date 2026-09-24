@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import sqlite3
@@ -50,9 +51,11 @@ def _save(run: dict) -> None:
     tmp.replace(path)
 
 
-def create_run(path: Path, contract_name: str, objective: str) -> dict:
+def create_run(path: Path, contract_name: str, objective: str, display_name: str | None = None) -> dict:
     contract = load_contract(contract_name)
     data_profile = profile(path)
+    if display_name:
+        data_profile["filename"] = display_name
     if not data_profile["records"]:
         raise ValueError("No records found")
     plan = make_plan(data_profile, objective)
@@ -92,6 +95,7 @@ def _init_db(connection: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_records_row ON records(row_number);
         CREATE INDEX IF NOT EXISTS idx_records_review ON records(review);
+        CREATE TABLE IF NOT EXISTS fingerprints (digest TEXT PRIMARY KEY);
     """)
 
 
@@ -105,7 +109,6 @@ def execute_run(run_id: str) -> None:
     contract = load_contract(run["contract"])
     connection = _connect(run_id)
     _init_db(connection)
-    seen: set[str] = set()
     batch: list[tuple[str, int, dict, dict, list]] = []
     try:
         for row_number, raw in read_records(Path(run["source_file"])):
@@ -113,12 +116,12 @@ def execute_run(run_id: str) -> None:
                 run["metrics"]["rejected"] += 1
                 continue
             cleaned, audit = clean_record(raw, run["plan"])
-            fingerprint = _dump(cleaned)
-            if run["plan"].get("deduplicate_exact") and fingerprint in seen:
-                run["metrics"]["duplicates"] += 1
-                continue
-            if len(seen) < 250_000:
-                seen.add(fingerprint)
+            if run["plan"].get("deduplicate_exact"):
+                fingerprint = hashlib.sha256(json.dumps(cleaned, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
+                inserted = connection.execute("INSERT OR IGNORE INTO fingerprints VALUES (?)", (fingerprint,)).rowcount
+                if not inserted:
+                    run["metrics"]["duplicates"] += 1
+                    continue
             record_id = f"REC-{row_number:08d}"
             batch.append((record_id, row_number, raw, cleaned, audit))
             if len(batch) >= 20:
@@ -202,16 +205,35 @@ def summary(run_id: str) -> dict:
         connection.close()
 
 
-def export_csv(run_id: str) -> str:
+def iter_csv(run_id: str):
     get_run(run_id)
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["record_id", "row_number", "label", "confidence", "engine", "review", "action", "raw_data", "cleaned_data", "semantic_state"])
+    yield output.getvalue()
+    output.seek(0)
+    output.truncate(0)
     connection = _connect(run_id)
     try:
         for row in connection.execute("SELECT * FROM records ORDER BY row_number"):
             item = _decode(row)
             writer.writerow([item["record_id"], item["row_number"], item["decision"]["label"], item["decision"]["confidence"], item["decision"]["engine"], item["review"]["status"], item["action"]["status"], _dump(item["raw_data"]), _dump(item["cleaned_data"]), _dump(item["semantic_state"])])
+            yield output.getvalue()
+            output.seek(0)
+            output.truncate(0)
     finally:
         connection.close()
-    return output.getvalue()
+
+
+def iter_json(run_id: str):
+    run = get_run(run_id)
+    yield '{"run":' + _dump(run) + ',"records":['
+    connection = _connect(run_id)
+    try:
+        first = True
+        for row in connection.execute("SELECT * FROM records ORDER BY row_number"):
+            yield ("" if first else ",") + _dump(_decode(row))
+            first = False
+    finally:
+        connection.close()
+    yield "]}"

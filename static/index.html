@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UADC — Data Operations Console</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">◇</span><div><strong>UADC</strong><small>Data Operations Console</small></div></div>
+      <nav aria-label="Main navigation">
+        <a href="#intake" class="nav-link active" data-target="intake"><span>01</span> Data intake</a>
+        <a href="#discovery" class="nav-link" data-target="discovery"><span>02</span> Discovery</a>
+        <a href="#pipeline" class="nav-link" data-target="pipeline"><span>03</span> Pipeline</a>
+        <a href="#explorer" class="nav-link" data-target="explorer"><span>04</span> Explorer</a>
+        <a href="#exports" class="nav-link" data-target="exports"><span>05</span> Exports</a>
+      </nav>
+      <div class="sidebar-footer"><span class="live-dot"></span> Local workspace <small>v0.1 · text & tabular</small></div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><span>WORKSPACE / OVERVIEW</span><div id="service-status" class="service-status">Checking services…</div></header>
+      <div class="content">
+        <div class="hero"><div><div class="eyebrow">CLASSIFY ANY DATASET</div><h1>Make sense of<br><em>messy data.</em></h1><p>Profile, clean, interpret, classify, and inspect every decision in one place.</p></div><div class="hero-orbit"><div class="orbit one"></div><div class="orbit two"></div><div class="orbit-core">U</div></div></div>
+
+        <section id="intake" class="section"><div class="section-heading"><div><span class="section-index">01 / INPUT</span><h2>Data intake</h2></div><span class="section-hint">Start with a file and a decision contract</span></div>
+          <div class="panel upload-panel">
+            <form id="intake-form">
+              <label class="dropzone" id="dropzone" for="file"><input id="file" name="file" type="file" accept=".csv,.tsv,.json,.jsonl,.xlsx,.txt,.log,.md" required><span class="upload-icon">↥</span><strong>Drop your dataset here</strong><span>or click to browse · CSV, TSV, JSON, JSONL, XLSX, TXT, LOG, MD</span><b id="file-name">No file selected</b></label>
+              <div class="form-row"><label>Classifier<select id="contract" name="contract"></select></label><label>Objective <span class="optional">optional</span><input id="objective" name="objective" placeholder="e.g. Route requests to the right team"></label></div>
+              <button class="primary-button" id="analyze-button" type="submit">Analyze dataset <span>→</span></button>
+            </form>
+          </div>
+        </section>
+
+        <section id="discovery" class="section hidden"><div class="section-heading"><div><span class="section-index">02 / UNDERSTAND</span><h2>Dataset discovery</h2></div><span class="section-hint" id="source-name"></span></div>
+          <div class="metric-grid" id="profile-metrics"></div>
+          <div class="two-col"><div class="panel"><div class="panel-heading"><h3>Fields & quality</h3><span>Inferred from source</span></div><div class="table-wrap"><table><thead><tr><th>FIELD</th><th>TYPE</th><th>MISSING</th></tr></thead><tbody id="fields-table"></tbody></table></div></div><div class="panel"><div class="panel-heading"><h3>Sample record</h3><span>Original data</span></div><pre id="sample-record" class="code-block"></pre></div></div>
+          <div class="panel plan-panel"><div class="panel-heading"><div><h3>Adaptive cleaning plan</h3><p id="plan-origin"></p></div><span class="safe-badge">BOUNDED OPERATIONS</span></div><div id="plan-operations" class="operations"></div><div class="plan-footer"><span>Every change gets an audit entry. No generated Python is executed.</span><button id="run-button" class="primary-button" type="button">Run pipeline <span>→</span></button></div></div>
+        </section>
+
+        <section id="pipeline" class="section hidden"><div class="section-heading"><div><span class="section-index">03 / PROCESS</span><h2>Pipeline monitor</h2></div><span class="pill" id="run-status">READY</span></div><div class="panel pipeline-panel"><div class="steps" id="steps"><div>01 <strong>Ingest & profile</strong><span>complete</span></div><div>02 <strong>Clean</strong><span>waiting</span></div><div>03 <strong>Interpret</strong><span>waiting</span></div><div>04 <strong>Laya decision</strong><span>waiting</span></div><div>05 <strong>Policy & simulation</strong><span>waiting</span></div></div><div class="progress-track"><div id="progress-bar"></div></div><p id="progress-text">Ready to run.</p></div>
+          <div class="metric-grid" id="result-metrics"></div><div class="two-col"><div class="panel"><div class="panel-heading"><h3>Classification distribution</h3><span>All processed records</span></div><div id="label-chart" class="bar-chart"></div></div><div class="panel"><div class="panel-heading"><h3>Decision engines</h3><span>Source of predictions</span></div><div id="engine-chart" class="engine-chart"></div><p class="small-note">Rule demo scores are never treated as calibrated model confidence.</p></div></div>
+        </section>
+
+        <section id="explorer" class="section hidden"><div class="section-heading"><div><span class="section-index">04 / INVESTIGATE</span><h2>Classification explorer</h2></div><select id="review-filter"><option value="">All records</option><option value="AUTO_APPROVED">Auto approved</option><option value="NEEDS_REVIEW">Needs review</option><option value="UNRESOLVED">Unresolved</option></select></div><div class="two-col explorer-grid"><div class="panel"><div class="panel-heading"><h3>Records</h3><span id="record-count">0 results</span></div><div class="table-wrap"><table><thead><tr><th>RECORD</th><th>LABEL</th><th>REVIEW</th></tr></thead><tbody id="records-table"></tbody></table></div><div class="pagination"><button id="prev-page" type="button">← Previous</button><span id="page-label">1 / 1</span><button id="next-page" type="button">Next →</button></div></div><div class="panel inspector"><div class="panel-heading"><h3>Decision trace</h3><span>Raw → action</span></div><div id="record-detail" class="empty-detail">Select a record to inspect its full lineage.</div></div></div></section>
+
+        <section id="exports" class="section hidden"><div class="section-heading"><div><span class="section-index">05 / DELIVER</span><h2>Export center</h2></div></div><div class="export-grid"><a id="export-xlsx" class="export-card"><span class="file-icon">X</span><strong>Excel dashboard</strong><small>11 sheets · charts · audit · review queue</small><b>Download ↗</b></a><a id="export-csv" class="export-card"><span class="file-icon">C</span><strong>CSV results</strong><small>Flat classification and lineage data</small><b>Download ↗</b></a><a id="export-json" class="export-card"><span class="file-icon">{ }</span><strong>JSON package</strong><small>Full structured run and records</small><b>Download ↗</b></a></div></section>
+      </div>
+    </main>
+  </div>
+  <div id="toast" role="alert" class="toast hidden"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

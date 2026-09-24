@@ -72,6 +72,7 @@ def read_records(path: Path) -> Iterator[tuple[int, dict]]:
         from openpyxl import load_workbook
 
         workbook = load_workbook(path, read_only=True, data_only=True)
+        ordinal = 0
         try:
             for sheet in workbook.worksheets:
                 rows = sheet.iter_rows(values_only=True)
@@ -80,7 +81,8 @@ def read_records(path: Path) -> Iterator[tuple[int, dict]]:
                     continue
                 names = [str(cell) if cell is not None else f"column_{i+1}" for i, cell in enumerate(header)]
                 for row_number, values in enumerate(rows, 2):
-                    yield row_number, {names[i]: value for i, value in enumerate(values) if value is not None}
+                    ordinal += 1
+                    yield ordinal, {"_source_sheet": sheet.title, "_source_row": row_number, **{names[i]: value for i, value in enumerate(values) if value is not None}}
         finally:
             workbook.close()
     else:
@@ -103,7 +105,7 @@ def profile(path: Path, sample_limit: int = 12) -> dict:
             malformed += 1
         if len(samples) < sample_limit:
             samples.append(row)
-        fingerprint = json.dumps(row, sort_keys=True, ensure_ascii=False, default=str)
+        fingerprint = hashlib.sha256(json.dumps(row, sort_keys=True, ensure_ascii=False, default=str).encode()).digest()
         if fingerprint in seen:
             duplicates += 1
         elif len(seen) < 100_000:
